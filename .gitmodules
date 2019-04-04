@@ -1,0 +1,3 @@
+[submodule "wireless-crawler"]
+	path = wireless-crawler
+	url = https://github.com/rileylloyd24/TorFingerprinting
