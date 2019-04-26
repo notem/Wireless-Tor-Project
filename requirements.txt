@@ -2,3 +2,4 @@ numpy
 keras
 sklearn
 scapy
+matplotlib==3.0.3

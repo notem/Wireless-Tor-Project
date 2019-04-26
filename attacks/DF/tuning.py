@@ -115,32 +115,6 @@ def parse_arguments():
     return parser.parse_args()
 
 
-#def perform_gridsearch(classes, X, Y, param_grid={}, callbacks=[]):
-#
-#    cut = int(X.shape[0]*0.8)
-#    X_train, y_train, X_valid, y_valid = X[:cut], Y[:cut], X[cut:], Y[cut:]
-#    for input_shape in param_grid['input_shape']:
-#        for batch_size in param_grid['batch_size']:
-#            for filter_num in param_grid['filter_num']:
-#                for fc_layer_size in param_grid['fc_layer_size']:
-#                
-#                    print("[GridSearch] {},{},{},{}...".format(input_shape, batch_size, filter_num, fc_layer_size))
-#                    model = ConvNet.build(classes,
-#                                          input_shape,
-#                                          filter_num=filter_num,
-#                                          fc_layer_size=fc_layer_size)
-#
-#                    history = model.fit(X_train, y_train,
-#                                       batch_size=batch_size,
-#                                       epochs=300,
-#                                       verbose=2,
-#                                       validation_data=(X_valid, y_valid),
-#                                       callbacks=callbacks)
-#                    top_score = max(history['val_acc'])
-#                    epoch_num = history['val_acc'].index(top_score)
-#                    print("[GridSearch] ({},{}) {},{},{},{}...".format(top_score, epoch_num, input_shape, batch_size, filter_num, fc_layer_size))
-#    return
-
 def main():
     """
     Run GridSearch on DF Keras model
@@ -152,10 +126,10 @@ def main():
     X, Y = load_data(args.traces)
     # number of sites
     classes = len(np.unique(Y))
-	# convert array types to floats
+    # convert array types to floats
     X = X.astype('float32')
     Y = Y.astype('float32')
-	# convert labels to categorical
+    # convert labels to categorical
     Y = np_utils.to_categorical(Y, classes)
     K.set_image_dim_ordering("tf")  # tf is tensorflow
 
@@ -182,7 +156,7 @@ def main():
                        (16, 32, 64, 128, 256, 512),
                        (32, 64, 128, 256, 512, 1024),
                        (64, 128, 256, 512, 1024, 2048)
-                      ],
+                       ],
         # number of items in layer size tuple determines FC layer counter
         # eg. one value == one FC layer (not including softmax)
         "fc_layer_size": [[256],
@@ -198,8 +172,8 @@ def main():
         "activation_function": ["relu"]
     }
 
-    #print("Beginning Grid Search...")
-    #perform_gridsearch(classes, X, Y, param_grid, callbacks_list)
+    # print("Beginning Grid Search...")
+    # perform_gridsearch(classes, X, Y, param_grid, callbacks_list)
 
     print("Parameter search space: {}".format(param_grid))
     grid = GridSearchCV(estimator=model,

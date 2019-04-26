@@ -1,21 +1,20 @@
-import keras
 from keras import backend as K
 from keras.models import Sequential, load_model
-from keras.layers import Conv1D, MaxPooling1D, AveragePooling1D, BatchNormalization
+from keras.layers import Conv1D, MaxPooling1D, BatchNormalization
 from keras.layers.core import Activation, Flatten, Dense, Dropout
-from keras.layers.advanced_activations import ELU
 from keras.initializers import glorot_uniform
 from keras.callbacks import ModelCheckpoint, EarlyStopping
 import random
 from keras.utils import np_utils
-from keras.optimizers import Adam, SGD, Nadam, Adamax
+from keras.optimizers import Adamax
 import numpy as np
-import time
 import sys
 import os
 from timeit import default_timer as timer
 from pprint import pprint
 import argparse
+from sklearn import metrics
+import json
 
 random.seed(0)
 
@@ -108,11 +107,12 @@ class ConvNet:
                       metrics=["accuracy"])
         return model
 
+
 def LoadDataMonTiming(length, directory):
     """
     Prepare the training, testing, and validation datasets
     """
-    def load_from_dir(dirpath, delimiter=' ', max_instances_per_class=0):
+    def load_from_dir(dirpath, delimiter=' '):
         """
         Read-in trace files from a directory.
         """
@@ -187,6 +187,9 @@ def parse_arguments():
     parser.add_argument('-q', '--quiet',
                         action="store_true",
                         help="Lower verbosity of output.")
+    parser.add_argument('--confusion_matrix',
+                        type=str,
+                        help="Location to store confusion matrix data (as a json).")
     return parser.parse_args()
 
 
@@ -293,6 +296,16 @@ def main():
     print("<==H=I=S=T=O=R=Y==>")
     pprint(history.history)
     print("<=================>")
+
+    if args.confusion_matrix:
+        print("\n=> Generating confusion matrix file...")
+        predictions = model.predict(X_test)
+        predictions = np.argmax(predictions, axis=1)
+        labels = np.argmax(y_test, axis=1)
+        matrix = metrics.confusion_matrix(labels, predictions)
+        print(matrix)
+        with open(args.confusion_matrix, "w") as fi:
+            json.dump(matrix, fi, indent=4)
 
     # summarize history for accuracy
     sys.stdout.close()
