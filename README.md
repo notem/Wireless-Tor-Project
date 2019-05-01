@@ -28,4 +28,4 @@ In order to run any of the scripts in this repository, the python requirements m
 
 [3] Sirinam et al. “Deep fingerprinting: Undermining website fingerprinting defenses with deep  learning,” CCS 2018.
 
-##### This capstone project was performed in coordination with the Center for Cybersecurity at RIT
+##### This capstone project was performed in collaboration with the Center for Cybersecurity at RIT
