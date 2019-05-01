@@ -193,9 +193,17 @@ def filter_pcap(filepath):
     use tshark to filter traces by IP/MAC address
     :return: the path to the filtered pcap file
     """
+    # generate pathname for temporary filtered pcap
     new_path = os.path.join(os.path.dirname(filepath), "filtered_capture.pcap")
-    os.system("tshark ")
-    return filepath
+
+    # wireshark filter to select only relevant packets
+    mac_filter = ' or '.join(["wlan.addr=={}".format(addr) for addr in MAC_TARGETS])
+
+    # run tshark filtering
+    os.system("tshark -r {file} -2 -R {filter} -w {outpath}".format(file=filepath,
+                                                                    filter=mac_filter,
+                                                                    outpath=new_path))
+    return new_path
 
 
 def out_network_task(filepath):
