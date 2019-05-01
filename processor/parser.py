@@ -20,9 +20,11 @@ Should combine all the txt files into one directory
 # if your captures are polluted 
 #   (ie. captures contain traffic from multiple crawler instances) 
 #   then the resulting traces will be bad!
-TARGETS = [
+MAC_TARGETS = [
     "00:25:22:50:8d:a7",  # Box1 USB wlan
     "9c:ef:d5:fc:32:67",  # Box2 USB wlan
+]
+IP_TARGETS = [
     "192.168.1.176",
     "192.168.1.198"
 ]
@@ -43,7 +45,7 @@ CTR = 1  # control
 DAT = 2  # data
 
 
-def parse_pcap(path, adjust_times=True, client_ip=None):
+def parse_pcap_ip(path, adjust_times=True, client_ip=None):
     """
     function processes IP-level capture pcap into a sequence of 2-tuple packet representations.
     the Scapy library is used for parsing the captures
@@ -61,9 +63,9 @@ def parse_pcap(path, adjust_times=True, client_ip=None):
                 elif packet[IP].src == client_ip:
                     direction = 1
             else:
-                if packet[IP].dst in TARGETS:
+                if packet[IP].dst in IP_TARGETS:
                     direction = -1
-                elif packet[IP].src in TARGETS:
+                elif packet[IP].src in IP_TARGETS:
                     direction = 1
 
             if not direction:
@@ -85,7 +87,7 @@ def parse_pcap(path, adjust_times=True, client_ip=None):
     return sequence
 
 
-def parse_pcap_raw(file_name, adjust_times=True, target=None):
+def parse_pcap_wlan(file_name, adjust_times=True, target=None):
     """
     function processes wireless capture pcap into a sequence of 2-tuple packet representations.
     the Scapy library is used for parsing the captures
@@ -111,10 +113,10 @@ def parse_pcap_raw(file_name, adjust_times=True, target=None):
                     direction = 1
             else:
                 # client is RA (reciever address)
-                if pkt.addr1 in TARGETS:
+                if pkt.addr1 in MAC_TARGETS:
                     direction = -1
                 # client is TA (transmitter address)
-                elif pkt.addr2 in TARGETS:
+                elif pkt.addr2 in MAC_TARGETS:
                     direction = 1
 
             # addr1 and addr2 are same as sometimes the Pi is the destination
@@ -158,11 +160,17 @@ def parse_arguments():
                         required=True)
     parser.add_argument("--TYPE",
                         required=True,
-                        default="default",
-                        choices=["raw", "default"])
+                        default="ip",
+                        choices=["wlan", "ip"])
     parser.add_argument("--SITES",
                         required=False,
-                        default="./sites")
+                        default="./sites.json")
+    parser.add_argument("--INSTANCES",
+                        required=False,
+                        default="./instances.json")
+    parser.add_argument("--CHECKPOINT",
+                        required=False,
+                        default="./checkpoint.txt")
     return parser.parse_args()
 
 
@@ -174,10 +182,20 @@ def in_network_task(filepath):
         batch, site, instance = folder.split("_")
         path = os.path.join(root, fi)
         try:
-            sequence = parse_pcap(path)
-            return (site, sequence)
+            sequence = parse_pcap_ip(path)
+            return (site, sequence, filepath)
         except Exception as exc:
-            print("encountered exception", exc)
+            print("encountered exception", exc, filepath)
+
+
+def filter_pcap(filepath):
+    """
+    use tshark to filter traces by IP/MAC address
+    :return: the path to the filtered pcap file
+    """
+    new_path = os.path.join(os.path.dirname(filepath), "filtered_capture.pcap")
+    os.system("tshark ")
+    return filepath
 
 
 def out_network_task(filepath):
@@ -188,20 +206,28 @@ def out_network_task(filepath):
         batch, site, instance = folder.split("_")
         path = os.path.join(root, fi)
         try:
-            sequence = parse_pcap_raw(path)
-            return (site, sequence)
+            # use tshark to filter our noise packets (reduces computation time)
+            new_path = filter_pcap(path)
+
+            # use Scapy to process pcap into packet sequence
+            sequence = parse_pcap_wlan(new_path)
+
+            # remove filtered captured
+            os.remove(new_path)
+
+            return (site, sequence, filepath)
         except Exception as exc:
             print("encountered exception", exc)
-            return (site, None)
+            return (site, None, filepath)
 
 
-def preprocessor(inputhere, output, site_map, raw=False):
+def preprocessor(input, output, site_map, instance_map, checkpoint, wlan=False):
     """
     Start a multiprocessing pool to handle processing pcap files in parallel.
     Packet sequences are saved to a text file following Wang's format as the worker processes produce results.
     The site names are mapped to numbers dynamically, and these mappings are saved for later reference.
     This function will load prior mappings if a file is provided.
-    :param inputhere: root directory path containing pcap files
+    :param input: root directory path containing pcap files
     :param output: directory which to save trace files
     :param site_map: path to file where site to number mappings should be saved
     :return: nothing
@@ -217,23 +243,34 @@ def preprocessor(inputhere, output, site_map, raw=False):
     # site_map is used to map site names to numbers
     # instance counters are not saved between runs
     if os.path.exists(site_map):
-        with open(args.site_map, "r") as fi:
+        with open(site_map, "r") as fi:
             site_to_num = json.load(fi)
         if len(site_to_num.values()) > 0:
             next_site_num = max(site_to_num.values()) + 1
         else:
             next_site_num = 0
+    # load instance_map if file has been provided
+    if os.path.exists(instance_map):
+        with open(instance_map, "r") as fi:
+            num_to_inst = json.load(fi)
 
     # create list of pcap files to process
     flist = []
-    for root, dirs, files in os.walk(inputhere):
+    for root, dirs, files in os.walk(input):
         # filter for only pcap files
         files = [fi for fi in files if fi.endswith(".pcap")]
         flist.extend([(root, f) for f in files])
 
+    # load checkpoint (if a checkpoint file is provided)
+    checkpoint_file = None
+    if checkpoint is not None:
+        checkpoint_file = open(checkpoint, 'rw')
+        processed_paths = [line for line in checkpoint_file]
+        flist = [path for path in flist if path not in processed_paths]
+
     # process pcaps in parallel
     with Pool() as pool:
-        if raw:
+        if wlan:
             iter = pool.imap_unordered(out_network_task, flist)
         else:
             iter = pool.imap_unordered(in_network_task, flist)
@@ -244,8 +281,12 @@ def preprocessor(inputhere, output, site_map, raw=False):
             print("Progress: {}/{}                \r".format(i + 1, len(flist)), end="")
 
             # if results of task are bad, ignore
-            if res is None or len(res) != 2:
+            if res is None or len(res) < 2:
                 continue
+
+            # if checkpointing is enabled, appending latest path to file
+            if checkpoint_file is not None:
+                checkpoint_file.writelines([res[3]])
 
             # save the sequence to file
             site, sequence = res[0], res[1]
@@ -267,6 +308,8 @@ def preprocessor(inputhere, output, site_map, raw=False):
     # lazy make directories
     try:
         os.makedirs(os.path.dirname(site_map))
+        os.makedirs(os.path.dirname(instance_map))
+        os.makedirs(os.path.dirname(checkpoint))
     except:
         pass
 
@@ -276,9 +319,20 @@ def preprocessor(inputhere, output, site_map, raw=False):
 
     # save site_map to json
     with open(site_map, "w") as fi:
-        json.dump(site_map, fi, indent=4)
+        json.dump(site_to_num, fi, indent=4)
+    with open(instance_map, "w") as fi:
+        json.dump(num_to_inst, fi, indent=4)
+
+    # close checkpoint file
+    if checkpoint_file is not None:
+        checkpoint_file.close()
 
 
 if __name__ == '__main__':
     args = parse_arguments()
-    preprocessor(args.INPUT, args.OUTPUT, args.SITES, raw=args.TYPE == "raw")
+    preprocessor(args.INPUT,
+                 args.OUTPUT,
+                 args.SITES,
+                 args.INSTANCES,
+                 args.CHECKPOINT,
+                 wlan=args.TYPE == "wlan")

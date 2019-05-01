@@ -105,7 +105,7 @@ def load_features(path_to_features):
     return training_features, test_features, feature_labels
 
 
-def RF_closedworld(path_to_dict, figure_path=None):
+def RF_closedworld(path_to_dict):
     """Closed world RF classification of data -- only uses sk.learn classification - does not do additional k-nn."""
 
     training, test, feature_labels = load_features(path_to_dict)
@@ -126,21 +126,6 @@ def RF_closedworld(path_to_dict, figure_path=None):
     for score, label in sorted_importance:
         index += 1
         print("%d. %s (%f)" % (index, label, score))
-
-#    if figure_path is not None:
-#        X = [label for score, label in sorted_importance[:20]]
-#        Y = [score for score, label in sorted_importance[:20]]
-#        y_pos = np.arange(len(X))
-#        std = np.std([tree.feature_importances_ for tree in model.estimators_], axis=0)
-#        indices = np.argsort(model.feature_importances_)[::-1][:20]
-#
-#        plt.figure()
-#        plt.title("RF Feature Importance")
-#        plt.xlabel("Feature")
-#        plt.ylabel("Scores")
-#        plt.bar(y_pos, Y, color='r', yerr=std[indices])
-#        plt.xticks(y_pos, y_pos)
-#        plt.savefig(figure_path, format='pdf')
 
     scores = cross_val_score(model, np.array(tr_data), np.array(tr_label))
     print("cross_val_score = ", scores.mean())
@@ -167,14 +152,6 @@ def parse_arguments():
                         nargs=1,
                         type=str,
                         help="Path to traces root directory.")
-    parser.add_argument("--figure",
-                        nargs=1,
-                        type=str,
-                        help="Path to save the feature importance figure.")
-    parser.add_argument("--time",
-                        action='store_true',
-                        default=False,
-                        help="Use time features.")
     return parser.parse_args()
 
 
@@ -194,7 +171,7 @@ def main():
 
         # Example command line:
         # $ python k-FP.py --evaluate --features /path/to/features
-        RF_closedworld(args.features[0], args.figure[0] if args.figure else None)
+        RF_closedworld(args.features[0])
 
     return 0
 
