@@ -182,27 +182,43 @@ def in_network_task(filepath):
         batch, site, instance = folder.split("_")
         path = os.path.join(root, fi)
         try:
-            sequence = parse_pcap_ip(path)
-            return (site, sequence, filepath)
+            # use tshark to filter our noise packets (reduces computation time)
+            new_path = filter_pcap(path, type='ip')
+
+            # use Scapy to process pcap into packet sequence
+            sequence = parse_pcap_ip(new_path)
+
+            # remove filtered captured
+            if new_path.endswith(".tmp"):
+                os.remove(new_path)
+
+            return site, sequence, os.path.join(*filepath)
         except Exception as exc:
-            print("encountered exception", exc, filepath)
+            print("encountered exception", exc, os.path.join(*filepath))
 
 
-def filter_pcap(filepath):
+def filter_pcap(filepath, type='ip'):
     """
     use tshark to filter traces by IP/MAC address
     :return: the path to the filtered pcap file
     """
     # generate pathname for temporary filtered pcap
-    new_path = os.path.join(os.path.dirname(filepath), "filtered_capture.pcap")
+    new_path = os.path.join(os.path.dirname(filepath), "filtered_capture.pcap.tmp")
 
     # wireshark filter to select only relevant packets
-    mac_filter = ' or '.join(["wlan.addr=={}".format(addr) for addr in MAC_TARGETS])
+    if type == 'ip':
+        tfilter = ' or '.join(["ip.addr == {}".format(addr) for addr in IP_TARGETS])
+    elif type == 'wlan':
+        tfilter = ' or '.join(["wlan.addr == {}".format(addr) for addr in MAC_TARGETS])
+        tfilter += " and wlan.fc.type == 2"
+    else:
+        tfilter = ""
 
     # run tshark filtering
-    os.system("tshark -r {file} -2 -R {filter} -w {outpath}".format(file=filepath,
-                                                                    filter=mac_filter,
-                                                                    outpath=new_path))
+    os.system("tshark -r {file} -q -2 -R \"{filter}\" -w {outpath} {tail}".format(file=filepath,
+                                                                                  filter=tfilter,
+                                                                                  outpath=new_path,
+                                                                                  tail="2>/dev/null"))
     return new_path
 
 
@@ -215,18 +231,19 @@ def out_network_task(filepath):
         path = os.path.join(root, fi)
         try:
             # use tshark to filter our noise packets (reduces computation time)
-            new_path = filter_pcap(path)
+            new_path = filter_pcap(path, type='wlan')
 
             # use Scapy to process pcap into packet sequence
             sequence = parse_pcap_wlan(new_path)
 
             # remove filtered captured
-            os.remove(new_path)
+            if new_path.endswith(".tmp"):
+                os.remove(new_path)
 
-            return (site, sequence, filepath)
+            return site, sequence, os.path.join(*filepath)
         except Exception as exc:
             print("encountered exception", exc)
-            return (site, None, filepath)
+            return site, None, os.path.join(*filepath)
 
 
 def preprocessor(input, output, site_map, instance_map, checkpoint, wlan=False):
@@ -272,46 +289,50 @@ def preprocessor(input, output, site_map, instance_map, checkpoint, wlan=False):
     # load checkpoint (if a checkpoint file is provided)
     checkpoint_file = None
     if checkpoint is not None:
-        checkpoint_file = open(checkpoint, 'rw')
+        checkpoint_file = open(checkpoint, 'a+')
         processed_paths = [line for line in checkpoint_file]
         flist = [path for path in flist if path not in processed_paths]
 
-    # process pcaps in parallel
-    with Pool() as pool:
-        if wlan:
-            iter = pool.imap_unordered(out_network_task, flist)
-        else:
-            iter = pool.imap_unordered(in_network_task, flist)
+    try:
+        # process pcaps in parallel
+        with Pool() as pool:
+            if wlan:
+                iter = pool.imap_unordered(out_network_task, flist)
+            else:
+                iter = pool.imap_unordered(in_network_task, flist)
 
-        # iterate through processed pcaps as they become available
-        # pcaps are parsed in parallel, however parsed sequences are saved to file in serial
-        for i, res in enumerate(iter):
-            print("Progress: {}/{}                \r".format(i + 1, len(flist)), end="")
+            # iterate through processed pcaps as they become available
+            # pcaps are parsed in parallel, however parsed sequences are saved to file in serial
+            for i, res in enumerate(iter):
+                print("Progress: {}/{}                \r".format(i + 1, len(flist)), end="")
 
-            # if results of task are bad, ignore
-            if res is None or len(res) < 2:
-                continue
+                # if results of task are bad, ignore
+                if res is None or len(res) < 2:
+                    continue
 
-            # if checkpointing is enabled, appending latest path to file
-            if checkpoint_file is not None:
-                checkpoint_file.writelines([res[3]])
+                # if checkpointing is enabled, appending latest path to file
+                if checkpoint_file is not None:
+                    checkpoint_file.write("{}\n".format(res[2]))
 
-            # save the sequence to file
-            site, sequence = res[0], res[1]
-            if sequence is not None:
-                # add site to mappings if first occurrence
-                if site not in site_to_num.keys():
-                    site_to_num[site] = next_site_num
-                    num_to_inst[next_site_num] = 0
-                    next_site_num += 1
+                # save the sequence to file
+                site, sequence = res[0], res[1]
+                if sequence is not None:
+                    # add site to mappings if first occurrence
+                    if site not in site_to_num.keys():
+                        site_to_num[site] = next_site_num
+                        num_to_inst[next_site_num] = 0
+                        next_site_num += 1
 
-                # save to file
+                    # save to file
                 out_path = os.path.join(output, "{}-{}".format(site_to_num[site],
                                                                num_to_inst[site_to_num[site]]))
                 save_to_file(sequence, out_path)
 
                 # increase the site number by one
                 num_to_inst[site_to_num[site]] += 1
+
+    except KeyboardInterrupt:
+        print("Caught keyboard interrupt. Doing cleanup...")
 
     # lazy make directories
     try:
